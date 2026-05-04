@@ -24,6 +24,24 @@ interface TrackingStore {
     checkActiveTracking: () => Promise<void>;
 }
 
+function notifyMiniPlayerIdle() {
+    api.updateMiniPlayerState({
+        isTracking: false,
+        elapsedSeconds: 0,
+        description: ''
+    });
+}
+
+function notifyMiniPlayerActive(workItem: WorkItem, startTime: string) {
+    api.updateMiniPlayerState({
+        isTracking: true,
+        elapsedSeconds: 0,
+        jiraKey: workItem.jira_key,
+        description: workItem.description,
+        startTime
+    });
+}
+
 export const useTrackingStore = create<TrackingStore>((set, get) => ({
     activeWorkItem: null,
     activeTimeSliceId: null,
@@ -91,11 +109,15 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
         // Notify main process for tray update
         api.setTrayIcon('active', workItem.description);
         api.setTrayTooltip(`Tracking: ${workItem.description}`);
+        notifyMiniPlayerActive(workItem, startTimeToUse);
     },
 
     stopTracking: async () => {
         const { activeTimeSliceId, activeWorkItem, startTime } = get();
-        if (!activeTimeSliceId || !startTime) return null;
+        if (!activeTimeSliceId || !startTime) {
+            notifyMiniPlayerIdle();
+            return null;
+        }
 
         const now = new Date();
         let finalEndTime = formatISO(now);
@@ -132,6 +154,8 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
             totalTimeSpent: 0,
             historicalBase: 0
         });
+
+        notifyMiniPlayerIdle();
 
         return finalEndTime;
     },
@@ -254,6 +278,10 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
         // Notify main process for tray update
         api.setTrayIcon('active', workItem.description);
         api.setTrayTooltip(`Tracking: ${workItem.description}`);
+        const currentStartTime = get().startTime;
+        if (currentStartTime) {
+            notifyMiniPlayerActive(workItem, currentStartTime);
+        }
     },
 
     checkActiveTracking: async () => {
@@ -280,6 +308,7 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
                 // Update tray
                 api.setTrayIcon('active', workItem.description);
                 api.setTrayTooltip(`Tracking: ${workItem.description}`);
+                notifyMiniPlayerActive(workItem, activeSlice.start_time);
             }
         } else {
             set({
@@ -290,6 +319,7 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
             });
             api.setTrayIcon('idle');
             api.setTrayTooltip('Jira Time Tracker');
+            notifyMiniPlayerIdle();
         }
     }
 }))
