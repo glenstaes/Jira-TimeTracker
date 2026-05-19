@@ -37,3 +37,7 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL,
   updated_at INTEGER DEFAULT (unixepoch())
 );
+
+CREATE INDEX IF NOT EXISTS idx_time_slices_jira_worklog_id
+  ON time_slices(jira_worklog_id)
+  WHERE jira_worklog_id IS NOT NULL;

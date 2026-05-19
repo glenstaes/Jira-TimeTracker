@@ -92,6 +92,11 @@ function initSchema(database: Database.Database) {
   `;
 
   database.exec(schema);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_time_slices_jira_worklog_id
+    ON time_slices(jira_worklog_id)
+    WHERE jira_worklog_id IS NOT NULL;
+  `);
 
   // Run migrations for existing databases
   runMigrations(database);
@@ -217,6 +222,25 @@ function runMigrations(database: Database.Database) {
       ALTER TABLE jira_connections ADD COLUMN cloud_id TEXT;
     `);
     console.log('Migration completed successfully');
+  }
+
+  try {
+    const worklogIndexExists = database.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type='index' AND name='idx_time_slices_jira_worklog_id'
+    `).get();
+
+    if (!worklogIndexExists) {
+      console.log('Running migration: Adding index on jira_worklog_id');
+      database.exec(`
+        CREATE INDEX idx_time_slices_jira_worklog_id
+        ON time_slices(jira_worklog_id)
+        WHERE jira_worklog_id IS NOT NULL;
+      `);
+      console.log('Migration completed successfully');
+    }
+  } catch (error) {
+    console.error('Failed to create jira_worklog_id index:', error);
   }
 }
 

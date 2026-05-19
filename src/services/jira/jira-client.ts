@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { format } from 'date-fns';
+import type { JiraIssue, JiraUser, JiraWorklog } from './jira-types';
 
 // Configuration for API Token authentication (Basic Auth)
 export interface JiraApiTokenConfig {
@@ -20,14 +21,6 @@ export type JiraConfig = JiraApiTokenConfig | JiraOAuthConfig;
 // Type guard to check if config is OAuth
 export function isOAuthConfig(config: JiraConfig): config is JiraOAuthConfig {
     return 'cloudId' in config && 'accessToken' in config;
-}
-
-export interface JiraWorklog {
-    id: string;
-    issueId: string;
-    timeSpentSeconds: number;
-    started: string;
-    comment?: string | Record<string, unknown>;
 }
 
 export class JiraClient {
@@ -64,17 +57,46 @@ export class JiraClient {
         }
     }
 
-    async searchIssues(jql: string): Promise<{ id: string; key: string; fields: { summary: string } }[]> {
+    async searchIssues(jql: string): Promise<JiraIssue[]> {
+        return this.searchIssuesPaginated(jql, ['summary'], 20);
+    }
+
+    async searchIssuesByWorklogDateRange(startDate: string, endDate: string, authorAccountId: string): Promise<JiraIssue[]> {
+        const start = format(new Date(startDate), 'yyyy/MM/dd');
+        const end = format(new Date(endDate), 'yyyy/MM/dd');
+        const escapedAccountId = authorAccountId.replace(/"/g, '\\"');
+        const jql = `worklogAuthor = "${escapedAccountId}" AND worklogDate >= "${start}" AND worklogDate <= "${end}" ORDER BY updated DESC`;
+        return this.searchIssuesPaginated(jql, ['summary'], 100);
+    }
+
+    private async searchIssuesPaginated(jql: string, fields: string[], pageSize: number): Promise<JiraIssue[]> {
         try {
             console.log(`[JiraClient] Searching with JQL: ${jql}`);
-            const response = await this.client.post('/search/jql', {
-                jql,
-                fields: ['summary'],
-                maxResults: 20
-            });
-            console.log(`[JiraClient] Search response:`, JSON.stringify(response.data, null, 2));
-            const issues = response.data.issues || response.data;
-            return Array.isArray(issues) ? issues : [];
+            const issues: JiraIssue[] = [];
+            let nextPageToken: string | undefined;
+            let isLast = false;
+
+            do {
+                const response = await this.client.get<{
+                    issues?: JiraIssue[];
+                    nextPageToken?: string;
+                    isLast?: boolean;
+                }>('/search/jql', {
+                    params: {
+                        jql,
+                        maxResults: pageSize,
+                        fields,
+                        nextPageToken,
+                    },
+                });
+
+                const batch = response.data.issues || [];
+                issues.push(...batch);
+                nextPageToken = response.data.nextPageToken;
+                isLast = response.data.isLast ?? !nextPageToken;
+            } while (!isLast && nextPageToken);
+
+            return issues;
         } catch (error: unknown) {
             const err = error as { config?: { method?: string; baseURL?: string; url?: string }; message?: string; response?: { status?: number; data?: unknown } };
             console.error(`Jira search failed [${err.config?.method?.toUpperCase()} ${err.config?.baseURL}${err.config?.url}]:`, err.message);
@@ -92,8 +114,30 @@ export class JiraClient {
 
     async getWorklogs(issueIdOrKey: string): Promise<JiraWorklog[]> {
         try {
-            const response = await this.client.get<{ worklogs: JiraWorklog[] }>(`/issue/${issueIdOrKey}/worklog`);
-            return response.data.worklogs;
+            const worklogs: JiraWorklog[] = [];
+            let startAt = 0;
+            let total = 0;
+
+            do {
+                const response = await this.client.get<{
+                    worklogs: JiraWorklog[];
+                    startAt?: number;
+                    maxResults?: number;
+                    total?: number;
+                }>(`/issue/${issueIdOrKey}/worklog`, {
+                    params: {
+                        startAt,
+                        maxResults: 100,
+                    },
+                });
+
+                const batch = response.data.worklogs || [];
+                total = response.data.total || batch.length;
+                worklogs.push(...batch);
+                startAt += response.data.maxResults || batch.length;
+            } while (startAt < total);
+
+            return worklogs;
         } catch (error) {
             console.error('Failed to get worklogs:', error);
             throw error;
@@ -193,7 +237,7 @@ export class JiraClient {
         }
     }
 
-    async getCurrentUser(): Promise<{ displayName: string }> {
+    async getCurrentUser(): Promise<JiraUser> {
         try {
             return await this.getData('/myself');
         } catch (error) {
