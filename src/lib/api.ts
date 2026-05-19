@@ -51,6 +51,26 @@ export interface JiraConnection {
     token_expires_at?: number;
 }
 
+export interface JiraWorklogImportRequest {
+    startDate: string;
+    endDate: string;
+    connectionIds: number[];
+}
+
+export interface JiraWorklogImportFailure {
+    connectionId?: number;
+    jiraKey?: string;
+    worklogId?: string;
+    error: string;
+}
+
+export interface JiraWorklogImportResult {
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: JiraWorklogImportFailure[];
+}
+
 export interface OAuthFlowResult {
     success: boolean;
     cloudId?: string;
@@ -139,6 +159,8 @@ export const api = {
     updateJiraWorklog: (issueKey: string, worklogId: string, data: { timeSpentSeconds: number, comment: string, started: string }) =>
         ipc.invoke('jira:update-worklog', { issueKey, worklogId, ...data }),
     getJiraWorklogs: (issueKey: string) => ipc.invoke('jira:get-worklogs', { issueKey }),
+    importJiraWorklogs: (request: JiraWorklogImportRequest) =>
+        ipc.invoke('jira:import-worklogs', request) as Promise<JiraWorklogImportResult>,
     testJiraConnection: (config: { baseUrl: string, email: string, apiToken: string }) => ipc.invoke('jira:test-connection', config),
     getDatabasePath: () => ipc.invoke('database:get-path') as Promise<string>,
     selectDatabaseFile: () => ipc.invoke('database:select-file') as Promise<{ success: boolean; filePath?: string; error?: string; canceled?: boolean }>,

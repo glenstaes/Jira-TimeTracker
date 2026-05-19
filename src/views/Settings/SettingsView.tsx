@@ -24,6 +24,7 @@ import { useSearchParams } from "react-router-dom"
 import { api } from "@/lib/api"
 import { MessageDialog } from "@/components/shared/MessageDialog"
 import { ColorPicker } from "@/components/shared/ColorPicker"
+import { ImportJiraWorklogsDialog } from "@/components/Settings/ImportJiraWorklogsDialog"
 
 type Theme = 'light' | 'dark' | 'system';
 type SettingsTab = 'general' | 'connections' | 'database' | 'developer';
@@ -46,6 +47,7 @@ export function SettingsView() {
     const [clearWorkItems, setClearWorkItems] = React.useState(false);
     const [message, setMessage] = React.useState<{ title: string, description: string } | null>(null);
     const [isImporting, setIsImporting] = React.useState(false);
+    const [jiraImportOpen, setJiraImportOpen] = React.useState(false);
     const [awayThreshold, setAwayThreshold] = React.useState(5);
     const [awayEnabled, setAwayEnabled] = React.useState(true);
     const [awaySoundEnabled, setAwaySoundEnabled] = React.useState(true);
@@ -586,21 +588,34 @@ export function SettingsView() {
                             <CardTitle className="flex items-center gap-2">
                                 <Upload className="h-5 w-5" /> Import Data
                             </CardTitle>
-                            <CardDescription>Import time slices from a CSV file exported from Grindstone.</CardDescription>
+                            <CardDescription>Import time slices from CSV or Jira worklogs into your local database.</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="grid gap-2">
-                                <p className="text-sm text-muted-foreground">
-                                    Expected CSV format: Start of timeslice, End of timeslice, timeslice notes, WorkItem, Jira key<br />
-                                    <span className="text-xs">Times should be in UTC format (e.g., 2025-12-01 07:30:00)</span>
-                                </p>
-                                <Button onClick={handleCsvImport} disabled={isImporting} className="w-fit">
-                                    {isImporting ? (
-                                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
-                                    ) : (
-                                        <><Upload className="h-4 w-4 mr-2" /> Select CSV File...</>
-                                    )}
-                                </Button>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <div className="grid gap-2 rounded-lg border p-4">
+                                    <p className="text-sm font-medium">CSV Import</p>
+                                    <p className="text-sm text-muted-foreground">
+                                        Expected CSV format: Start of timeslice, End of timeslice, timeslice notes, WorkItem, Jira key<br />
+                                        <span className="text-xs">Times should be in UTC format (e.g., 2025-12-01 07:30:00)</span>
+                                    </p>
+                                    <Button onClick={handleCsvImport} disabled={isImporting} className="w-fit">
+                                        {isImporting ? (
+                                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
+                                        ) : (
+                                            <><Upload className="h-4 w-4 mr-2" /> Select CSV File...</>
+                                        )}
+                                    </Button>
+                                </div>
+
+                                <div className="grid gap-2 rounded-lg border p-4">
+                                    <p className="text-sm font-medium">Jira Worklog Import</p>
+                                    <p className="text-sm text-muted-foreground">
+                                        Import your own Jira worklogs for a date range and selected Jira connections.
+                                    </p>
+                                    <Button variant="outline" onClick={() => setJiraImportOpen(true)} className="w-fit">
+                                        <Upload className="h-4 w-4 mr-2" /> Import Jira Worklogs...
+                                    </Button>
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
@@ -744,6 +759,11 @@ export function SettingsView() {
                 onOpenChange={(open) => !open && setMessage(null)}
                 title={message?.title || ""}
                 description={message?.description || ""}
+            />
+
+            <ImportJiraWorklogsDialog
+                open={jiraImportOpen}
+                onOpenChange={setJiraImportOpen}
             />
         </div>
     )
