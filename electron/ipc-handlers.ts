@@ -425,6 +425,7 @@ export function registerIpcHandlers() {
         base_url: string;
         email: string;
         api_token: string;
+        is_enabled?: number;
         auth_type?: string;
         cloud_id?: string;
     };
@@ -564,6 +565,224 @@ export function registerIpcHandlers() {
             comment,
             started
         });
+    });
+
+    ipcMain.handle('jira:import-worklogs', async (_, { startDate, endDate, connectionIds }: {
+        startDate: string;
+        endDate: string;
+        connectionIds: number[];
+    }) => {
+        if (!startDate || !endDate) {
+            throw new Error('A start and end date are required.');
+        }
+
+        if (!Array.isArray(connectionIds) || connectionIds.length === 0) {
+            throw new Error('Select at least one Jira connection.');
+        }
+
+        const startTime = new Date(startDate).getTime();
+        const endTime = new Date(endDate).getTime();
+
+        if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+            throw new Error('Invalid import date range.');
+        }
+
+        const connections = db.prepare(`
+            SELECT *
+            FROM jira_connections
+            WHERE is_enabled = 1
+              AND id IN (${connectionIds.map(() => '?').join(',')})
+        `).all(...connectionIds) as ConnectionRow[];
+
+        if (connections.length === 0) {
+            throw new Error('No enabled Jira connections found for import.');
+        }
+
+        const result: {
+            created: number;
+            updated: number;
+            skipped: number;
+            failed: Array<{ connectionId?: number; jiraKey?: string; worklogId?: string; error: string }>;
+        } = {
+            created: 0,
+            updated: 0,
+            skipped: 0,
+            failed: [],
+        };
+
+        const findWorkItemStmt = db.prepare(`
+            SELECT id
+            FROM work_items
+            WHERE jira_connection_id = ?
+              AND jira_key = ?
+            LIMIT 1
+        `);
+        const insertWorkItemStmt = db.prepare(`
+            INSERT INTO work_items (jira_connection_id, jira_key, description)
+            VALUES (?, ?, ?)
+        `);
+        const updateWorkItemStmt = db.prepare(`
+            UPDATE work_items
+            SET description = ?, updated_at = unixepoch()
+            WHERE id = ?
+        `);
+        const findImportedSliceStmt = db.prepare(`
+            SELECT ts.*
+            FROM time_slices ts
+            JOIN work_items wi ON wi.id = ts.work_item_id
+            WHERE ts.jira_worklog_id = ?
+              AND wi.jira_connection_id = ?
+            LIMIT 1
+        `);
+        const insertSliceStmt = db.prepare(`
+            INSERT INTO time_slices (
+                work_item_id,
+                start_time,
+                end_time,
+                notes,
+                synced_to_jira,
+                jira_worklog_id,
+                synced_start_time,
+                synced_end_time,
+                synced_notes
+            )
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+        `);
+        const updateSliceStmt = db.prepare(`
+            UPDATE time_slices
+            SET work_item_id = ?,
+                start_time = ?,
+                end_time = ?,
+                notes = ?,
+                synced_to_jira = 1,
+                jira_worklog_id = ?,
+                synced_start_time = ?,
+                synced_end_time = ?,
+                synced_notes = ?,
+                updated_at = unixepoch()
+            WHERE id = ?
+        `);
+
+        for (const conn of connections) {
+            try {
+                const client = await createJiraClientForConnection(conn);
+                const currentUser = await client.getCurrentUser();
+                const issues = await client.searchIssuesByWorklogDateRange(startDate, endDate, currentUser.accountId);
+
+                for (const issue of issues) {
+                    try {
+                        const worklogs = await client.getWorklogs(issue.key);
+
+                        for (const worklog of worklogs) {
+                            const authorMatches = worklog.author?.accountId === currentUser.accountId;
+                            const worklogStartTime = new Date(worklog.started).getTime();
+
+                            if (!authorMatches || Number.isNaN(worklogStartTime) || worklogStartTime < startTime || worklogStartTime > endTime) {
+                                continue;
+                            }
+
+                            const startedAt = new Date(worklog.started);
+                            const endedAt = new Date(worklogStartTime + (worklog.timeSpentSeconds * 1000));
+                            const normalizedStart = formatISO(startedAt);
+                            const normalizedEnd = formatISO(endedAt);
+                            const normalizedNotes = jiraCommentToPlainText(worklog.comment);
+                            const issueSummary = issue.fields?.summary || issue.key;
+
+                            const importWorklog = db.transaction(() => {
+                                let workItem = findWorkItemStmt.get(conn.id, issue.key) as { id: number } | undefined;
+
+                                if (!workItem) {
+                                    const insertInfo = insertWorkItemStmt.run(conn.id, issue.key, issueSummary);
+                                    workItem = { id: insertInfo.lastInsertRowid as number };
+                                } else {
+                                    updateWorkItemStmt.run(issueSummary, workItem.id);
+                                }
+
+                                const existingSlice = findImportedSliceStmt.get(worklog.id, conn.id) as {
+                                    id: number;
+                                    work_item_id: number;
+                                    start_time: string;
+                                    end_time: string | null;
+                                    notes: string | null;
+                                    jira_worklog_id: string | null;
+                                    synced_start_time: string | null;
+                                    synced_end_time: string | null;
+                                    synced_notes: string | null;
+                                } | undefined;
+
+                                if (!existingSlice) {
+                                    insertSliceStmt.run(
+                                        workItem.id,
+                                        normalizedStart,
+                                        normalizedEnd,
+                                        normalizedNotes,
+                                        worklog.id,
+                                        normalizedStart,
+                                        normalizedEnd,
+                                        normalizedNotes
+                                    );
+                                    return 'created';
+                                }
+
+                                const unchanged =
+                                    existingSlice.work_item_id === workItem.id &&
+                                    existingSlice.start_time === normalizedStart &&
+                                    (existingSlice.end_time || null) === normalizedEnd &&
+                                    (existingSlice.notes || '') === normalizedNotes &&
+                                    (existingSlice.synced_start_time || null) === normalizedStart &&
+                                    (existingSlice.synced_end_time || null) === normalizedEnd &&
+                                    (existingSlice.synced_notes || '') === normalizedNotes;
+
+                                if (unchanged) {
+                                    return 'skipped';
+                                }
+
+                                updateSliceStmt.run(
+                                    workItem.id,
+                                    normalizedStart,
+                                    normalizedEnd,
+                                    normalizedNotes,
+                                    worklog.id,
+                                    normalizedStart,
+                                    normalizedEnd,
+                                    normalizedNotes,
+                                    existingSlice.id
+                                );
+                                return 'updated';
+                            });
+
+                            const outcome = importWorklog();
+                            if (outcome === 'created') {
+                                result.created += 1;
+                            } else if (outcome === 'updated') {
+                                result.updated += 1;
+                            } else {
+                                result.skipped += 1;
+                            }
+                        }
+                    } catch (error: unknown) {
+                        const err = error as { message?: string };
+                        result.failed.push({
+                            connectionId: conn.id,
+                            jiraKey: issue.key,
+                            error: err.message || 'Failed to import worklogs for issue.'
+                        });
+                    }
+                }
+            } catch (error: unknown) {
+                const err = error as { message?: string; response?: { data?: { errorMessages?: string[]; errors?: Record<string, string> } } };
+                const detail = err.response?.data?.errorMessages?.[0]
+                    || Object.values(err.response?.data?.errors || {})[0]
+                    || err.message
+                    || 'Failed to import from Jira connection.';
+                result.failed.push({
+                    connectionId: conn.id,
+                    error: detail
+                });
+            }
+        }
+
+        return result;
     });
 
     ipcMain.handle('jira:test-connection', async (_, config) => {
@@ -1099,6 +1318,39 @@ function parseCSV(content: string): string[][] {
     }
 
     return rows;
+}
+
+function jiraCommentToPlainText(comment: unknown): string {
+    if (!comment) return '';
+    if (typeof comment === 'string') return comment.trim();
+
+    const parts: string[] = [];
+
+    const walk = (node: unknown) => {
+        if (!node || typeof node !== 'object') return;
+
+        const record = node as { text?: unknown; content?: unknown; type?: unknown };
+        if (typeof record.text === 'string') {
+            parts.push(record.text);
+        }
+
+        if (Array.isArray(record.content)) {
+            for (const child of record.content) {
+                walk(child);
+            }
+
+            if (record.type === 'paragraph') {
+                parts.push('\n');
+            }
+        }
+    };
+
+    walk(comment);
+
+    return parts
+        .join('')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 
 function runMigrations(db: Database.Database) {
