@@ -16,6 +16,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip"
 import { TimeSliceTooltipContent } from "@/components/shared/TimeSliceTooltip"
+import { getJiraWorklogComment } from "./syncToJiraPayload"
 
 interface SyncToJiraDialogProps {
     date: Date;
@@ -109,12 +110,14 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                 const duration = differenceInSeconds(end, start);
 
                 try {
+                    const comment = getJiraWorklogComment(slice.notes);
+
                     let logResult;
                     if (slice.jira_worklog_id) {
                         try {
                             logResult = await api.updateJiraWorklog(slice.jira_key, slice.jira_worklog_id, {
                                 timeSpentSeconds: duration,
-                                comment: slice.notes || slice.work_item_description || "Worked on issue",
+                                comment,
                                 started: slice.start_time
                             });
                         } catch (updateError: unknown) {
@@ -127,7 +130,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                                 console.log(`Worklog ${slice.jira_worklog_id} not found, creating new one`);
                                 logResult = await api.addJiraWorklog(slice.jira_key, {
                                     timeSpentSeconds: duration,
-                                    comment: slice.notes || slice.work_item_description || "Worked on issue",
+                                    comment,
                                     started: slice.start_time
                                 });
                             } else {
@@ -137,7 +140,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                     } else {
                         logResult = await api.addJiraWorklog(slice.jira_key, {
                             timeSpentSeconds: duration,
-                            comment: slice.notes || slice.work_item_description || "Worked on issue",
+                            comment,
                             started: slice.start_time
                         });
                     }
