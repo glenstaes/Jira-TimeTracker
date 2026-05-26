@@ -4,6 +4,7 @@ import { formatISO } from 'date-fns'
 import path from 'node:path'
 import fs from 'node:fs'
 import { getDatabase } from '../src/database/db'
+import { normalizeTimeSliceBoundary } from '../src/lib/time-utils'
 import { updateTrayTooltip, updateTrayIcon } from './tray'
 import { getAppConfig, saveAppConfig } from './config-service'
 import { startUpdateInterval } from './auto-updater'
@@ -217,13 +218,20 @@ export function registerIpcHandlers() {
                 throw new Error(`Time slice ${slice.id} not found.`);
             }
 
-            const merged = { ...existing, ...slice };
+            const merged = {
+                ...existing,
+                ...slice,
+                start_time: normalizeTimeSliceBoundary(slice.start_time !== undefined ? slice.start_time : existing.start_time),
+                end_time: normalizeTimeSliceBoundary(slice.end_time !== undefined ? slice.end_time : existing.end_time),
+                synced_start_time: normalizeTimeSliceBoundary(slice.synced_start_time !== undefined ? slice.synced_start_time : existing.synced_start_time),
+                synced_end_time: normalizeTimeSliceBoundary(slice.synced_end_time !== undefined ? slice.synced_end_time : existing.synced_end_time)
+            };
 
             // Determine if we should reset the sync status
             let synced_to_jira = merged.synced_to_jira || 0;
             const notesChanged = slice.notes !== undefined && existing.notes !== slice.notes;
-            const startChanged = slice.start_time !== undefined && existing.start_time !== slice.start_time;
-            const endChanged = slice.end_time !== undefined && existing.end_time !== slice.end_time;
+            const startChanged = slice.start_time !== undefined && existing.start_time !== merged.start_time;
+            const endChanged = slice.end_time !== undefined && existing.end_time !== merged.end_time;
 
             if ((notesChanged || startChanged || endChanged) && existing.synced_to_jira === 1) {
                 console.log(`[IPC:save-time-slice] Drift detected (Notes: ${notesChanged}, Start: ${startChanged}, End: ${endChanged}) for synced slice ${slice.id}. Marking as out-of-sync.`);
@@ -253,7 +261,7 @@ export function registerIpcHandlers() {
             if (!slice.end_time) {
                 const activeSlices = db.prepare('SELECT id FROM time_slices WHERE end_time IS NULL').all() as { id: number }[];
                 if (activeSlices.length > 0) {
-                    const now = formatISO(new Date());
+                    const now = normalizeTimeSliceBoundary(formatISO(new Date()))!;
                     console.log(`[IPC:save-time-slice] Closing ${activeSlices.length} orphaned active slices before creating new one`);
                     const closeStmt = db.prepare('UPDATE time_slices SET end_time = ?, updated_at = unixepoch() WHERE id = ?');
                     for (const active of activeSlices) {
@@ -273,17 +281,17 @@ export function registerIpcHandlers() {
             `)
             const params = {
                 work_item_id: slice.work_item_id,
-                start_time: slice.start_time,
-                end_time: slice.end_time || null,
+                start_time: normalizeTimeSliceBoundary(slice.start_time),
+                end_time: normalizeTimeSliceBoundary(slice.end_time),
                 notes: slice.notes || '',
                 synced_to_jira: slice.synced_to_jira || 0,
                 jira_worklog_id: slice.jira_worklog_id || null,
-                synced_start_time: slice.synced_start_time || null,
-                synced_end_time: slice.synced_end_time || null,
+                synced_start_time: normalizeTimeSliceBoundary(slice.synced_start_time),
+                synced_end_time: normalizeTimeSliceBoundary(slice.synced_end_time),
                 synced_notes: slice.synced_notes || null
             };
             const info = stmt.run(params)
-            return { id: info.lastInsertRowid, ...slice }
+            return { id: info.lastInsertRowid, ...slice, ...params }
         }
     })
 
@@ -683,8 +691,8 @@ export function registerIpcHandlers() {
 
                             const startedAt = new Date(worklog.started);
                             const endedAt = new Date(worklogStartTime + (worklog.timeSpentSeconds * 1000));
-                            const normalizedStart = formatISO(startedAt);
-                            const normalizedEnd = formatISO(endedAt);
+                            const normalizedStart = normalizeTimeSliceBoundary(formatISO(startedAt))!;
+                            const normalizedEnd = normalizeTimeSliceBoundary(formatISO(endedAt))!;
                             const normalizedNotes = jiraCommentToPlainText(worklog.comment);
                             const issueSummary = issue.fields?.summary || issue.key;
 
@@ -1134,8 +1142,8 @@ export function registerIpcHandlers() {
             // CSV Import format handling
             // If it already looks like ISO (has T and Z or +/-), formatISO will handle it
             // If it's a simple date string, formatISO will add local offset
-            const startTime = formatISO(new Date(startTimeStr.trim()));
-            const endTime = endTimeStr?.trim() ? formatISO(new Date(endTimeStr.trim())) : null;
+            const startTime = normalizeTimeSliceBoundary(formatISO(new Date(startTimeStr.trim())))!;
+            const endTime = endTimeStr?.trim() ? normalizeTimeSliceBoundary(formatISO(new Date(endTimeStr.trim()))) : null;
 
             let workItem: { id: number } | undefined;
             if (jiraKey && jiraKey.trim()) {
@@ -1391,7 +1399,7 @@ function standardizeDate(dateStr: string | null) {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return null;
 
-    const standardized = formatISO(date);
+    const standardized = normalizeTimeSliceBoundary(formatISO(date));
     if (standardized !== dateStr) {
         return standardized;
     }

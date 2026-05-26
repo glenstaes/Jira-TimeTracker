@@ -1,3 +1,5 @@
+import { formatISO } from 'date-fns';
+
 /**
  * Rounds a date to the nearest interval.
  * If intervalMinutes is 0 or 1, just clears the seconds.
@@ -14,6 +16,19 @@ export function roundToNearestInterval(date: Date, intervalMinutes: number): Dat
     const timestamp = result.getTime();
     const roundedMs = Math.round(timestamp / intervalMs) * intervalMs;
     return new Date(roundedMs);
+}
+
+/**
+ * Normalizes a persisted time slice boundary to whole-minute precision.
+ */
+export function normalizeTimeSliceBoundary(dateStr: string | null | undefined): string | null {
+    if (!dateStr) return null;
+
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr;
+
+    date.setSeconds(0, 0);
+    return formatISO(date);
 }
 
 /**
