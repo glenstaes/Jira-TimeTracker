@@ -6,7 +6,7 @@ import {
     ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { WorkItem } from "@/lib/api"
-import { Edit2, Trash2, History, CheckCircle2, XCircle, ArrowRightLeft, ExternalLink } from "lucide-react"
+import { Edit2, Trash2, History, CheckCircle2, XCircle, ArrowRightLeft, ExternalLink, PlayCircle } from "lucide-react"
 
 interface WorkItemContextMenuProps {
     children: React.ReactNode;
@@ -15,6 +15,7 @@ interface WorkItemContextMenuProps {
     selectedCount: number;
     onEdit: (item: WorkItem) => void;
     onDelete: (item: WorkItem) => void;
+    onStartTracking: (item: WorkItem) => void;
     onShowHistory: (item: WorkItem) => void;
     onToggleCompletion: (ids: number[], completed: boolean) => void;
     onChangeConnection: () => void;
@@ -29,6 +30,7 @@ export function WorkItemContextMenu({
     selectedCount,
     onEdit,
     onDelete,
+    onStartTracking,
     onShowHistory,
     onToggleCompletion,
     onChangeConnection,
@@ -59,6 +61,11 @@ export function WorkItemContextMenu({
                     </>
                 ) : (
                     <>
+                        <ContextMenuItem onClick={() => onStartTracking(item)}>
+                            <PlayCircle className="mr-2 h-4 w-4 text-primary" />
+                            Start Tracking
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
                         <ContextMenuItem onClick={() => onToggleCompletion([item.id], item.is_completed === 0)}>
                             {item.is_completed === 0 ? (
                                 <>

@@ -3,7 +3,7 @@ import { api, WorkItem, JiraConnection } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Trash2, Edit2, Download, MoreHorizontal, History, Clock, CheckCircle2, XCircle, ArrowRightLeft, ExternalLink } from "lucide-react"
+import { Plus, Search, Trash2, Edit2, Download, MoreHorizontal, History, Clock, CheckCircle2, XCircle, ArrowRightLeft, ExternalLink, PlayCircle } from "lucide-react"
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
 import { ImportFromJiraDialog } from "@/components/WorkItem/ImportFromJiraDialog"
 import { CreateWorkItemDialog } from "@/components/WorkItem/CreateWorkItemDialog"
@@ -17,6 +17,8 @@ import { MessageDialog } from "@/components/shared/MessageDialog"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { WorkItemContextMenu } from "./WorkItemContextMenu"
+import { startTrackingFromWorkItemOverview } from "./workItemActions"
+import { useTrackingStore } from "@/stores/useTrackingStore"
 import {
     Pagination,
     PaginationContent,
@@ -135,6 +137,14 @@ export function WorkItemsView() {
             const url = `${baseUrl.replace(/\/$/, '')}/browse/${item.jira_key}`;
             api.openExternal(url);
         }
+    };
+
+    const handleStartTracking = (item: WorkItem) => {
+        startTrackingFromWorkItemOverview(item, {
+            startTracking: useTrackingStore.getState().startTracking,
+            refreshWorkItems: fetchItems,
+            logError: (message, err) => console.error(message, err)
+        });
     };
 
     const totalPages = Math.ceil(totalCount / itemsPerPage);
@@ -293,6 +303,7 @@ export function WorkItemsView() {
                                         selectedCount={selectedIds.length}
                                         onEdit={setEditItem}
                                         onDelete={setDeleteItem}
+                                        onStartTracking={handleStartTracking}
                                         onShowHistory={setTimeSlicesItem}
                                         onToggleCompletion={handleToggleCompletion}
                                         onChangeConnection={() => setBulkConnectionOpen(true)}
@@ -372,6 +383,11 @@ export function WorkItemsView() {
                                                             </>
                                                         ) : (
                                                             <>
+                                                                <DropdownMenuItem onClick={() => handleStartTracking(item)}>
+                                                                    <PlayCircle className="mr-2 h-4 w-4 text-primary" />
+                                                                    Start Tracking
+                                                                </DropdownMenuItem>
+                                                                <DropdownMenuSeparator />
                                                                 <DropdownMenuItem onClick={() => handleToggleCompletion([item.id], item.is_completed === 0)}>
                                                                     {item.is_completed === 0 ? (
                                                                         <>
