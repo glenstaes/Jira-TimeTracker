@@ -17,8 +17,10 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
 import { SyncToJiraDialog } from "@/components/Sync/SyncToJiraDialog"
 import { CopyTimeSliceDialog } from "@/components/TimeSlice/CopyTimeSliceDialog"
 import { MergeSlicesDialog } from "@/components/shared/MergeSlicesDialog"
-import { ArrowLeftRight, Plus } from "lucide-react"
+import { ArrowLeftRight, Plus, WandSparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { roundTimeSliceBoundaries } from "@/lib/time-utils"
+import { toast } from "sonner"
 
 export function Dashboard() {
     const { selectedDate, setSelectedDate } = useDateStore();
@@ -63,6 +65,7 @@ export function Dashboard() {
     const [jiraConnections, setJiraConnections] = useState<JiraConnection[]>([]);
     const [otherColor, setOtherColor] = useState("#64748b");
     const [dailyTargetHours, setDailyTargetHours] = useState(8);
+    const [roundingSlices, setRoundingSlices] = useState(false);
 
     // Refresh list when tracking starts/stops
     // AND detection of when timing stops to prompt for notes
@@ -141,6 +144,50 @@ export function Dashboard() {
             refresh();
         } catch (err) {
             console.error("Failed to merge slices", err);
+        }
+    }
+
+    const handleRoundTimeSlices = async () => {
+        setRoundingSlices(true);
+        try {
+            const settings = await api.getSettings();
+            const roundingEnabled = settings.rounding_enabled === 'true';
+            const configuredInterval = parseInt(settings.rounding_interval || '15', 10);
+            const intervalMinutes = roundingEnabled && Number.isFinite(configuredInterval)
+                ? configuredInterval
+                : 1;
+
+            let updatedCount = 0;
+
+            for (const slice of slices) {
+                const rounded = roundTimeSliceBoundaries(slice, intervalMinutes);
+                if (rounded.start_time === slice.start_time && rounded.end_time === slice.end_time) {
+                    continue;
+                }
+
+                await api.saveTimeSlice({
+                    id: slice.id,
+                    work_item_id: slice.work_item_id,
+                    start_time: rounded.start_time,
+                    end_time: rounded.end_time,
+                    notes: slice.notes
+                });
+                updatedCount++;
+            }
+
+            await useTrackingStore.getState().checkActiveTracking();
+            await refresh();
+
+            if (updatedCount > 0) {
+                toast.success(`Rounded ${updatedCount} time slice${updatedCount === 1 ? '' : 's'}`);
+            } else {
+                toast.info("Time slices already match the time rounding setting");
+            }
+        } catch (err) {
+            console.error("Failed to round time slices", err);
+            toast.error("Failed to round time slices");
+        } finally {
+            setRoundingSlices(false);
         }
     }
 
@@ -236,13 +283,24 @@ export function Dashboard() {
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h2 className="text-lg font-semibold">Time Slices</h2>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setAddSliceOpen(true)}
-                        >
-                            <Plus className="h-4 w-4 mr-2" /> Add Time Slice
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleRoundTimeSlices}
+                                disabled={loading || roundingSlices || slices.length === 0}
+                                title="Round time slices for the selected day"
+                            >
+                                <WandSparkles className="h-4 w-4 mr-2" /> Round Time Slices
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAddSliceOpen(true)}
+                            >
+                                <Plus className="h-4 w-4 mr-2" /> Add Time Slice
+                            </Button>
+                        </div>
                     </div>
                     {loading ? (
                         <div className="p-10 text-center text-muted-foreground animate-pulse">Loading...</div>

@@ -9,7 +9,7 @@ A single interval of tracked work assigned to exactly one work item. Persisted t
 _Avoid_: timeslice, slice
 
 **Time rounding**:
-A user setting that snaps timer-created boundaries to the nearest configured minute interval after whole-minute normalization. Whole-minute normalization still applies when time rounding is disabled.
+A user setting that snaps timer-created boundaries, and explicit user-selected time slice rounding commands, to the nearest configured minute interval after whole-minute normalization. Whole-minute normalization still applies when time rounding is disabled.
 _Avoid_: precision tracking
 
 **Work item**:

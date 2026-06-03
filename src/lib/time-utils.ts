@@ -18,6 +18,24 @@ export function roundToNearestInterval(date: Date, intervalMinutes: number): Dat
     return new Date(roundedMs);
 }
 
+type TimeSliceBoundaries = {
+    start_time: string;
+    end_time?: string | null;
+};
+
+/**
+ * Rounds the persisted boundaries on a time slice-shaped object.
+ */
+export function roundTimeSliceBoundaries<T extends TimeSliceBoundaries>(slice: T, intervalMinutes: number): T {
+    return {
+        ...slice,
+        start_time: formatISO(roundToNearestInterval(new Date(slice.start_time), intervalMinutes)),
+        end_time: slice.end_time
+            ? formatISO(roundToNearestInterval(new Date(slice.end_time), intervalMinutes))
+            : slice.end_time
+    };
+}
+
 /**
  * Normalizes a persisted time slice boundary to whole-minute precision.
  */
