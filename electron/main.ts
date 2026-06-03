@@ -9,9 +9,11 @@ import { initializeAutoUpdater } from './auto-updater'
 import { initializeAwayDetector } from './away-detector'
 import { initializeMiniPlayer } from './mini-player'
 import { handleOAuthCallback } from './oauth-service'
+import { configureLogging } from './logger'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 process.env.APP_ROOT = path.join(__dirname, '..')
+configureLogging()
 
 // Load package.json early to set app identity
 const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'));

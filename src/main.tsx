@@ -2,6 +2,9 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import '@/styles/globals.css'
+import { installRendererErrorLogging } from './lib/logging'
+
+installRendererErrorLogging()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
