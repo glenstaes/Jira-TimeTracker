@@ -61,6 +61,7 @@ export function SettingsView() {
     const [miniPlayerTheme, setMiniPlayerTheme] = React.useState("inverted");
     const [dailyTargetHours, setDailyTargetHours] = React.useState(8);
     const [hideCompletedItems, setHideCompletedItems] = React.useState(true);
+    const [logRetentionDays, setLogRetentionDays] = React.useState(30);
     const requestedTab = searchParams.get('tab');
     const activeTab: SettingsTab = requestedTab === 'connections' || requestedTab === 'database' || requestedTab === 'developer'
         ? requestedTab
@@ -97,6 +98,9 @@ export function SettingsView() {
             setDailyTargetHours(target);
             // Load search settings
             setHideCompletedItems(settings.hide_completed_items !== 'false');
+            // Load log settings
+            const retentionDays = settings.log_retention_days ? parseInt(settings.log_retention_days, 10) : 30;
+            setLogRetentionDays(Number.isFinite(retentionDays) ? Math.min(365, Math.max(1, retentionDays)) : 30);
         });
     }, []);
 
@@ -728,20 +732,39 @@ export function SettingsView() {
                                         Open the folder containing application log files.
                                     </p>
                                 </div>
-                                <Button
-                                    variant="outline"
-                                    onClick={async () => {
-                                        const result = await api.showLogs();
-                                        if (!result.success) {
-                                            setMessage({
-                                                title: "Logs Not Found",
-                                                description: result.error || "Could not find the log file location."
-                                            });
-                                        }
-                                    }}
-                                >
-                                    Show Logs
-                                </Button>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <Input
+                                            id="log-retention-days"
+                                            type="number"
+                                            min="1"
+                                            max="365"
+                                            value={logRetentionDays}
+                                            onChange={(event) => setLogRetentionDays(parseInt(event.target.value, 10) || 30)}
+                                            onBlur={async () => {
+                                                const normalized = await api.normalizeLogRetentionDays(logRetentionDays);
+                                                setLogRetentionDays(normalized);
+                                                await api.saveSetting('log_retention_days', String(normalized));
+                                            }}
+                                            className="w-24"
+                                        />
+                                        <span className="text-sm text-muted-foreground">days</span>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        onClick={async () => {
+                                            const result = await api.showLogs();
+                                            if (!result.success) {
+                                                setMessage({
+                                                    title: "Logs Not Found",
+                                                    description: result.error || "Could not find the log file location."
+                                                });
+                                            }
+                                        }}
+                                    >
+                                        Show Logs
+                                    </Button>
+                                </div>
                             </div>
                         </CardContent>
                     </Card>

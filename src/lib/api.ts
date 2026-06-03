@@ -197,6 +197,7 @@ export const api = {
     getAppVersion: () => ipc.invoke('app:get-version') as Promise<string>,
     quitAndInstallUpdate: () => ipc.send('update:quit-and-install'),
     checkForUpdates: () => ipc.invoke('update:check') as Promise<{ updateAvailable: boolean, version?: string }>,
+    normalizeLogRetentionDays: (retentionDays: number) => ipc.invoke('app:normalize-log-retention-days', retentionDays) as Promise<number>,
 
     // Merge logic
     mergeTimeSlices: (ids: number[]) => ipc.invoke('db:merge-time-slices', { ids }),

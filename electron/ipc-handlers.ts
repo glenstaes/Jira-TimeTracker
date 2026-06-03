@@ -10,6 +10,7 @@ import { getAppConfig, saveAppConfig } from './config-service'
 import { startUpdateInterval } from './auto-updater'
 import { startOAuthFlow, saveOAuthTokens, getValidAccessToken, cancelPendingOAuth } from './oauth-service'
 import { encrypt } from './crypto-service'
+import { cleanupApplicationLogs, getLogFilePath, getLogsDirectory, normalizeLogRetentionDays } from './logger'
 
 export function registerIpcHandlers() {
     const db = getDatabase()
@@ -25,6 +26,14 @@ export function registerIpcHandlers() {
         startUpdateInterval(interval);
     } catch (e) {
         console.error('Failed to initialize update interval:', e);
+    }
+
+    try {
+        const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+        const setting = stmt.get('log_retention_days') as { value: string } | undefined;
+        cleanupApplicationLogs(setting?.value);
+    } catch (e) {
+        console.error('Failed to clean up application logs:', e);
     }
 
     // Jira Connections
@@ -416,6 +425,10 @@ export function registerIpcHandlers() {
         if (key === 'update_check_interval') {
             const interval = parseInt(value, 10);
             startUpdateInterval(interval);
+        }
+
+        if (key === 'log_retention_days') {
+            cleanupApplicationLogs(value);
         }
 
         // Broadcast setting update to all windows (e.g. mini-player)
@@ -1266,20 +1279,23 @@ export function registerIpcHandlers() {
     });
 
     ipcMain.handle('app:show-logs', async () => {
-        // electron-log default path on Windows is %AppData%\<app-name>\logs\main.log
-        const logPath = path.join(app.getPath('userData'), 'logs', 'main.log');
+        const logPath = getLogFilePath();
         if (fs.existsSync(logPath)) {
             shell.showItemInFolder(logPath);
             return { success: true };
         } else {
             // Fallback to logs folder if file doesn't exist yet
-            const logsFolder = path.join(app.getPath('userData'), 'logs');
+            const logsFolder = getLogsDirectory();
             if (fs.existsSync(logsFolder)) {
                 shell.openPath(logsFolder);
                 return { success: true };
             }
         }
         return { success: false, error: 'Log file not found' };
+    });
+
+    ipcMain.handle('app:normalize-log-retention-days', async (_, retentionDays: unknown) => {
+        return normalizeLogRetentionDays(retentionDays);
     });
 }
 

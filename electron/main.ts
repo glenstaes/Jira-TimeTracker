@@ -13,7 +13,6 @@ import { configureLogging } from './logger'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 process.env.APP_ROOT = path.join(__dirname, '..')
-configureLogging()
 
 // Load package.json early to set app identity
 const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'));
@@ -24,6 +23,7 @@ if (process.platform === 'win32') {
   // Use appId for grouping if possible, but productName for pretty title
   app.setAppUserModelId(pkg.build?.appId || 'com.pmarien.jira-timetracker');
 }
+configureLogging()
 
 // Custom URL scheme for OAuth
 const PROTOCOL = 'jira-timetracker-app';
