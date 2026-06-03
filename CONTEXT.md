@@ -16,6 +16,10 @@ _Avoid_: precision tracking
 The task or Jira issue that receives one or more time slices.
 _Avoid_: task, ticket
 
+**Jira connection**:
+A configured link to one Jira site/account. Disabled Jira connections remain linked to their work items for context, but their work items are not ready to sync to Jira.
+_Avoid_: Jira account, integration
+
 **Active tracking**:
 The currently running interval of work, represented as exactly one open-ended time slice assigned to one work item.
 _Avoid_: timer session, current task

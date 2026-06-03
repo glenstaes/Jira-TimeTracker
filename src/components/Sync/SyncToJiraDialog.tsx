@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
 import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip"
 import { TimeSliceTooltipContent } from "@/components/shared/TimeSliceTooltip"
 import { Switch } from "@/components/ui/switch"
-import { createSyncToJiraEntries } from "./syncToJiraPayload"
+import { classifySyncToJiraSlices, createSyncToJiraEntries } from "./syncToJiraPayload"
 import type { SyncToJiraEntry } from "./syncToJiraPayload"
 
 interface SyncToJiraDialogProps {
@@ -31,6 +31,7 @@ interface SyncToJiraDialogProps {
 type SyncResult = {
     synced: SyncToJiraEntry[];
     skippedConnection: TimeSlice[];
+    skippedDisabledConnection: TimeSlice[];
     skippedKey: TimeSlice[];
     failed: { entry: SyncToJiraEntry; error: string }[];
 }
@@ -41,46 +42,8 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
     const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
     const [combineSameTicket, setCombineSameTicket] = useState(false);
 
-    // Filter logic
-    const { syncable, skippedConnection, skippedKey, activeSlice } = useMemo(() => {
-        const syncable: TimeSlice[] = [];
-        const skippedConnection: TimeSlice[] = [];
-        const skippedKey: TimeSlice[] = [];
-        let activeSlice: TimeSlice | undefined;
-
-        slices.forEach(s => {
-            // Check for active slice first - global blocker logic
-            if (!s.end_time) {
-                activeSlice = s;
-                return; // Don't add to other lists? Or just block the button?
-                // Requirement: "prevents synching that day". So if there is ANY active slice, we blocking everything.
-            }
-
-            // Must have Jira Key to be considered for sync or connection skip
-            if (!s.jira_key) {
-                skippedKey.push(s);
-                return;
-            }
-
-            // Must have Jira Connection to be syncable
-            if (!s.jira_connection_id) {
-                skippedConnection.push(s);
-                return;
-            }
-
-            // Already synced?
-            if (s.synced_to_jira) {
-                // Check if changed
-                const isOutOfSync = s.start_time !== s.synced_start_time ||
-                    s.end_time !== s.synced_end_time ||
-                    s.notes !== s.synced_notes;
-                if (!isOutOfSync) return; // Already synced and up to date
-            }
-
-            syncable.push(s);
-        });
-
-        return { syncable, skippedConnection, skippedKey, activeSlice };
+    const { syncable, skippedConnection, skippedDisabledConnection, skippedKey, activeSlice } = useMemo(() => {
+        return classifySyncToJiraSlices(slices);
     }, [slices]);
 
     const syncEntrySlices = useMemo(() => {
@@ -96,7 +59,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
         );
 
         return slices.filter(slice => {
-            if (!slice.end_time || !slice.jira_key || !slice.jira_connection_id) {
+            if (!slice.end_time || !slice.jira_key || !slice.jira_connection_id || slice.jira_connection_is_enabled === 0) {
                 return false;
             }
 
@@ -135,6 +98,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
         const result: SyncResult = {
             synced: [],
             skippedConnection: [...skippedConnection],
+            skippedDisabledConnection: [...skippedDisabledConnection],
             skippedKey: [...skippedKey],
             failed: []
         };
@@ -206,7 +170,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
             setSyncResult(result);
 
             // Show toast summary
-            const skippedCount = result.skippedConnection.length + result.skippedKey.length;
+            const skippedCount = result.skippedConnection.length + result.skippedDisabledConnection.length + result.skippedKey.length;
             const syncedSliceCount = getSyncedSliceCount(result.synced);
             toast.success(`Sync completed`, {
                 description: `${result.synced.length} worklogs synced (${syncedSliceCount} slices), ${skippedCount} skipped (see details), ${result.failed.length} failed.`
@@ -249,7 +213,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                         </div>
                     </div>
 
-                    {(syncResult.skippedConnection.length > 0 || syncResult.skippedKey.length > 0) && (
+                    {(syncResult.skippedConnection.length > 0 || syncResult.skippedDisabledConnection.length > 0 || syncResult.skippedKey.length > 0) && (
                         <div className="space-y-2">
                             <div className="flex items-center gap-2 text-amber-600">
                                 <AlertTriangle className="h-4 w-4" />
@@ -264,6 +228,15 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                                                 <span className="text-xs text-muted-foreground">{s.jira_key} - {formatDuration(s)}</span>
                                             </div>
                                             <span className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded">No Connection</span>
+                                        </div>
+                                    ))}
+                                    {syncResult.skippedDisabledConnection.map(s => (
+                                        <div key={s.id} className="text-sm p-2 bg-white dark:bg-slate-800 rounded border border-amber-100 dark:border-amber-900/30 flex justify-between items-center">
+                                            <div className="flex flex-col overflow-hidden">
+                                                <span className="font-medium truncate">{s.work_item_description}</span>
+                                                <span className="text-xs text-muted-foreground">{s.jira_key} - {formatDuration(s)}</span>
+                                            </div>
+                                            <span className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded">Disabled Connection</span>
                                         </div>
                                     ))}
                                     {syncResult.skippedKey.map(s => (
@@ -319,7 +292,7 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
         }
 
         // 3. Pre-Sync View
-        const hasWork = syncable.length > 0 || skippedConnection.length > 0 || skippedKey.length > 0;
+        const hasWork = syncable.length > 0 || skippedConnection.length > 0 || skippedDisabledConnection.length > 0 || skippedKey.length > 0;
 
         if (!hasWork) {
             return (
@@ -405,10 +378,10 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                 </div>
 
                 {/* Non-Syncable Items */}
-                {(skippedConnection.length > 0 || skippedKey.length > 0) && (
+                {(skippedConnection.length > 0 || skippedDisabledConnection.length > 0 || skippedKey.length > 0) && (
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-medium text-muted-foreground">Won't be Synced ({skippedConnection.length + skippedKey.length})</h4>
+                            <h4 className="text-sm font-medium text-muted-foreground">Not Ready to Sync ({skippedConnection.length + skippedDisabledConnection.length + skippedKey.length})</h4>
                         </div>
                         <ScrollArea className="h-[120px] border rounded bg-slate-50 dark:bg-slate-900/30" onWheel={(e) => e.stopPropagation()}>
                             <div className="p-1">
@@ -419,6 +392,18 @@ export function SyncToJiraDialog({ date, slices, open, onOpenChange, onSuccess }
                                             <div className="flex flex-col">
                                                 <span className="text-muted-foreground truncate max-w-[200px]">{s.work_item_description}</span>
                                                 <span className="text-[10px] text-amber-600/70 dark:text-amber-400/70">No Jira Connection</span>
+                                            </div>
+                                        </div>
+                                        <span className="font-mono text-xs text-muted-foreground">{formatDuration(s)}</span>
+                                    </div>
+                                ))}
+                                {skippedDisabledConnection.map(s => (
+                                    <div key={s.id} className="flex justify-between items-center p-2 text-sm border-b border-white/50 dark:border-slate-800 last:border-0 opacity-80">
+                                        <div className="flex items-center gap-3">
+                                            <span className="font-mono font-medium text-amber-600 dark:text-amber-500 w-[80px]">{s.jira_key}</span>
+                                            <div className="flex flex-col">
+                                                <span className="text-muted-foreground truncate max-w-[200px]">{s.work_item_description}</span>
+                                                <span className="text-[10px] text-amber-600/70 dark:text-amber-400/70">Disabled Connection</span>
                                             </div>
                                         </div>
                                         <span className="font-mono text-xs text-muted-foreground">{formatDuration(s)}</span>

@@ -174,7 +174,7 @@ export function registerIpcHandlers() {
     // Time Slices
     ipcMain.handle('db:get-time-slices', (_, { startStr, endStr }) => {
         const stmt = db.prepare(`
-            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, wi.jira_connection_id
+            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, jc.is_enabled as jira_connection_is_enabled, wi.jira_connection_id
             FROM time_slices ts 
             LEFT JOIN work_items wi ON ts.work_item_id = wi.id 
             LEFT JOIN jira_connections jc ON wi.jira_connection_id = jc.id
@@ -186,7 +186,7 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('db:get-time-slice', (_, id: number) => {
         const stmt = db.prepare(`
-            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, wi.jira_connection_id
+            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, jc.is_enabled as jira_connection_is_enabled, wi.jira_connection_id
             FROM time_slices ts 
             LEFT JOIN work_items wi ON ts.work_item_id = wi.id 
             LEFT JOIN jira_connections jc ON wi.jira_connection_id = jc.id
@@ -305,7 +305,7 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('db:get-work-item-time-slices', (_, workItemId: number) => {
         const stmt = db.prepare(`
-            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, wi.jira_connection_id
+            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, jc.is_enabled as jira_connection_is_enabled, wi.jira_connection_id
             FROM time_slices ts 
             LEFT JOIN work_items wi ON ts.work_item_id = wi.id 
             LEFT JOIN jira_connections jc ON wi.jira_connection_id = jc.id
@@ -317,7 +317,7 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('db:search-time-slices', (_, { query = '', limit = 50, offset = 0 } = {}) => {
         const sql = `
-            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, wi.jira_connection_id
+            SELECT ts.*, wi.description as work_item_description, wi.jira_key, jc.name as connection_name, jc.is_enabled as jira_connection_is_enabled, wi.jira_connection_id
             FROM time_slices ts 
             LEFT JOIN work_items wi ON ts.work_item_id = wi.id 
             LEFT JOIN jira_connections jc ON wi.jira_connection_id = jc.id
@@ -537,11 +537,14 @@ export function registerIpcHandlers() {
 
         if (workItem?.jira_connection_id) {
             const conn = db.prepare('SELECT * FROM jira_connections WHERE id = ?').get(workItem.jira_connection_id) as ConnectionRow | undefined;
-            if (conn) return conn; // Return it even if disabled? Usually yes for read/write if the user explicitly asks.
+            if (conn?.is_enabled === 0) {
+                throw new Error(`Jira connection "${conn.name}" is disabled.`);
+            }
+            if (conn) return conn;
         }
 
         // 2. Fallback to default
-        const defaultConn = db.prepare('SELECT * FROM jira_connections WHERE is_default = 1 LIMIT 1').get() as ConnectionRow | undefined;
+        const defaultConn = db.prepare('SELECT * FROM jira_connections WHERE is_default = 1 AND is_enabled = 1 LIMIT 1').get() as ConnectionRow | undefined;
         if (!defaultConn) throw new Error("No default Jira connection found, and issue is not linked to a specific connection.");
         return defaultConn;
     };

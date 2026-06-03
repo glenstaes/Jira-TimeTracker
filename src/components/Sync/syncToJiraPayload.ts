@@ -12,6 +12,14 @@ export interface SyncToJiraEntry {
     slices: TimeSlice[];
 }
 
+export interface SyncToJiraSliceClassification {
+    syncable: TimeSlice[];
+    skippedConnection: TimeSlice[];
+    skippedDisabledConnection: TimeSlice[];
+    skippedKey: TimeSlice[];
+    activeSlice?: TimeSlice;
+}
+
 interface CreateSyncToJiraEntriesOptions {
     combineSameTicket: boolean;
 }
@@ -48,6 +56,54 @@ export function createSyncToJiraEntries(
     }
 
     return Array.from(groups.values()).flatMap(createCombinedEntriesForGroup);
+}
+
+export function classifySyncToJiraSlices(slices: TimeSlice[]): SyncToJiraSliceClassification {
+    const syncable: TimeSlice[] = [];
+    const skippedConnection: TimeSlice[] = [];
+    const skippedDisabledConnection: TimeSlice[] = [];
+    const skippedKey: TimeSlice[] = [];
+    let activeSlice: TimeSlice | undefined;
+
+    for (const slice of slices) {
+        // Check for active slice first - global blocker logic
+        if (!slice.end_time) {
+            activeSlice = slice;
+            continue;
+        }
+
+        // Must have Jira Key to be considered for sync or connection skip
+        if (!slice.jira_key) {
+            skippedKey.push(slice);
+            continue;
+        }
+
+        // Must have Jira Connection to be syncable
+        if (!slice.jira_connection_id) {
+            skippedConnection.push(slice);
+            continue;
+        }
+
+        if (slice.jira_connection_is_enabled === 0) {
+            skippedDisabledConnection.push(slice);
+            continue;
+        }
+
+        // Already synced?
+        if (slice.synced_to_jira) {
+            // Check if changed
+            const isOutOfSync = slice.start_time !== slice.synced_start_time ||
+                slice.end_time !== slice.synced_end_time ||
+                slice.notes !== slice.synced_notes;
+            if (!isOutOfSync) {
+                continue;
+            }
+        }
+
+        syncable.push(slice);
+    }
+
+    return { syncable, skippedConnection, skippedDisabledConnection, skippedKey, activeSlice };
 }
 
 function createCombinedEntriesForGroup(slices: TimeSlice[]): SyncToJiraEntry[] {

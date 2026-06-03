@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { TimeSlice } from "@/lib/api";
-import { createSyncToJiraEntries, getJiraWorklogComment } from "./syncToJiraPayload.ts";
+import { classifySyncToJiraSlices, createSyncToJiraEntries, getJiraWorklogComment } from "./syncToJiraPayload.ts";
 
 function createSlice(overrides: Partial<TimeSlice>): TimeSlice {
     return {
@@ -92,4 +92,31 @@ test("keeps slices with distinct existing Jira worklog ids separate", () => {
 
     assert.equal(entries.length, 2);
     assert.deepEqual(entries.map(entry => entry.slices.map(slice => slice.id)), [[1], [2]]);
+});
+
+test("classifies slices for disabled Jira connections as not ready while keeping the Jira key", () => {
+    const disabledSlice = createSlice({
+        id: 7,
+        jira_key: "MEALDB-3000",
+        jira_connection_id: 3,
+        jira_connection_is_enabled: 0
+    });
+
+    const result = classifySyncToJiraSlices([disabledSlice]);
+
+    assert.equal(result.syncable.length, 0);
+    assert.equal(result.skippedDisabledConnection.length, 1);
+    assert.equal(result.skippedDisabledConnection[0].jira_key, "MEALDB-3000");
+});
+
+test("keeps enabled Jira connection slices ready to sync", () => {
+    const enabledSlice = createSlice({
+        id: 8,
+        jira_connection_is_enabled: 1
+    });
+
+    const result = classifySyncToJiraSlices([enabledSlice]);
+
+    assert.deepEqual(result.syncable.map(slice => slice.id), [8]);
+    assert.equal(result.skippedDisabledConnection.length, 0);
 });
